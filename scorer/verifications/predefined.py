@@ -6,7 +6,6 @@ import requests
 import json
 
 db = ArangoClient(hosts=config.ARANGO_SERVER).db('_system')
-snapshot_db = ArangoClient(hosts=config.ARANGO_SERVER).db('snapshot')
 
 files = [
     {'url': 'https://explorer.brightid.org/history/bitu.json', 'rank': 'score'},

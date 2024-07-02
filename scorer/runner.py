@@ -15,11 +15,11 @@ variables = db.collection('variables')
 verifiers = {
     'Seed': {'verifier': verifications.seed, 'step': 1},
     'SeedConnected': {'verifier': verifications.seed_connected, 'step': 1},
-    'SeedConnectedWithFriend': {'verifier': verifications.seed_connected_with_friend, 'step': 1},
+    # 'SeedConnectedWithFriend': {'verifier': verifications.seed_connected_with_friend, 'step': 1},
     # 'Yekta': {'verifier': verifications.yekta, 'step': 10},
     'BrightID': {'verifier': verifications.brightid, 'step': 1},
-    'DollarForEveryone': {'verifier': verifications.dollar_for_everyone, 'step': 1},
-    'SocialRecoverySetup': {'verifier': verifications.social_recovery_setup, 'step': 1},
+    # 'DollarForEveryone': {'verifier': verifications.dollar_for_everyone, 'step': 1},
+    # 'SocialRecoverySetup': {'verifier': verifications.social_recovery_setup, 'step': 1},
     'predefined': {'verifier': verifications.predefined, 'step': 1},
     'apps': {'verifier': verifications.apps, 'step': 1},
 }
@@ -30,7 +30,8 @@ def update_verifications_hashes(block):
     for v in verifiers:
         if block % (config.SNAPSHOTS_PERIOD * verifiers[v]['step']) != 0 or v == 'apps':
             continue
-        verifications = db['verifications'].find({'name': v, 'block': block})
+        # verifications = db['verifications'].find({'name': v, 'block': block})
+        verifications = db['verifications'].find({'name': v})
         hashes = [v.get('hash', '') for v in verifications]
         message = ''.join(sorted(hashes)).encode('ascii')
         h = base64.b64encode(sha256(message).digest()).decode("ascii")
@@ -49,26 +50,14 @@ def update_verifications_hashes(block):
     })
 
 
-def remove_verifications_before(block):
-    print(f'Removing verifications with block smaller than {block}')
-    db.aql.execute('''
-        FOR v IN verifications
-            FILTER  v.block < @remove_border
-            REMOVE { _key: v._key } IN verifications OPTIONS { exclusive: true }
-        ''', bind_vars={'remove_border': block})
 
-
-def process(snapshot):
+def process():
     get_time = lambda: time.strftime('%Y-%m-%d %H:%M:%S')
-    get_block = lambda snapshot: int(snapshot.strip('dump_').strip('_fnl'))
 
-    print(f'{get_time()} - processing {snapshot} started ...')
-    # restore snapshot
-    fname = os.path.join(config.SNAPSHOTS_PATH, snapshot)
-    res = os.system(f"arangorestore --server.username 'root' --server.password '' --server.endpoint 'tcp://{config.BN_ARANGO_HOST}:{config.BN_ARANGO_PORT}' --server.database snapshot --create-database true --create-collection true --import-data true --input-directory {fname} --threads 1")
-    assert res == 0, "restoring snapshot failed"
 
-    block = get_block(snapshot)
+    print(f'{get_time()} - processing scorer started...')
+    
+    block = db.collection('variables').get('LAST_BLOCK')['value']
     # If there are verifications for current block, it means there was
     # an error resulted in retrying the block. Remvoing these verifications
     # helps not filling database and preventing unknown problems that
@@ -84,23 +73,19 @@ def process(snapshot):
         verifiers[v]['verifier'].verify(block)
 
     update_verifications_hashes(block)
-    last_block = variables.get('VERIFICATION_BLOCK')['value']
-    # only keep verifications for this snapshot and previous one
-    remove_verifications_before(last_block)
-    variables.update({'_key': 'VERIFICATION_BLOCK', 'value': block})
+    fname = os.path.join(config.SNAPSHOTS_PATH, 'snapshot.chunk')
+
     # remove the snapshot file
     shutil.rmtree(fname, ignore_errors=True)
     print(f'{get_time()} - processing {fname} completed')
 
 
 def next_snapshot():
-    is_final = lambda snapshot: snapshot.endswith('_fnl')
-    get_block = lambda snapshot: int(snapshot.strip('dump_').strip('_fnl'))
+    
     while True:
-        snapshots = os.listdir(config.SNAPSHOTS_PATH)
-        snapshots.sort(key=get_block)
-        snapshot = next(filter(is_final, snapshots), None)
-        if snapshot:
+        fname = os.path.join(config.SNAPSHOTS_PATH, 'snapshot.chunk')
+        if os.path.exists(fname):
+            snapshot = 1
             return snapshot
         time.sleep(1)
 

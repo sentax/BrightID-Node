@@ -4,7 +4,6 @@ import socket
 import json
 import base64
 import hashlib
-import shutil
 import requests
 import traceback
 from arango import ArangoClient, errno
@@ -72,14 +71,13 @@ def process_op(op):
 
 
 def save_snapshot(block):
-    dir_name = config.SNAPSHOTS_PATH.format(block)
-    fnl_dir_name = f'{dir_name}_fnl'
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    collections_file = os.path.join(dir_path, 'collections.json')
-    res = os.system(
-        f'arangodump --overwrite true --compress-output false --server.password "" --server.endpoint "tcp://{config.BN_ARANGO_HOST}:{config.BN_ARANGO_PORT}" --output-directory {dir_name} --maskings {collections_file}')
-    assert res == 0, "dumping snapshot failed"
-    shutil.move(dir_name, fnl_dir_name)
+    dir_name = config.SNAPSHOTS_PATH()
+    # create snapshot.chunk file to trigger the scorer service
+    with open(os.path.join(dir_name, 'snapshot.chunk'), 'w') as f:
+        f.write(str(block))
+    
+    
+    
 
 
 def update_num_sealers():
@@ -133,6 +131,8 @@ def main():
             for i, tx in enumerate(block['transactions']):
                 if tx['to'] and tx['to'].lower() in (config.TO_ADDRESS.lower(), config.DEPRECATED_TO_ADDRESS.lower()):
                     process(tx['input'], block.timestamp)
+                    
+            variables.update({'_key': 'LAST_BLOCK', 'value': block_number})
             if block_number % config.SNAPSHOTS_PERIOD == 0:
                 save_snapshot(block_number)
                 # PREV_SNAPSHOT_TIME is used by some verification
@@ -141,7 +141,6 @@ def main():
                 variables.update(
                     {'_key': 'PREV_SNAPSHOT_TIME', 'value': block['timestamp']})
                 remove_old_operations()
-            variables.update({'_key': 'LAST_BLOCK', 'value': block_number})
             last_block = block_number
 
 

@@ -15,6 +15,7 @@ const parser = require("expr-eval").Parser;
 
 const connectionsColl = db._collection("connections");
 const connectionsHistoryColl = db._collection("connectionsHistory");
+const membershipsHistoryColl = db._collection("membershipsHistory");
 const groupsColl = db._collection("groups");
 const usersInGroupsColl = db._collection("usersInGroups");
 const usersColl = db._collection("users");
@@ -351,6 +352,13 @@ function addMembership(groupId, key, timestamp) {
     checkJoiningFamily(groupId, key);
   }
   addUserToGroup(groupId, key, timestamp);
+  membershipsHistoryColl.insert({
+    _from: "users/" + key,
+    _to: "groups/" + groupId,
+    type: "join",
+    timestamp
+  });
+
 }
 
 function deleteGroup(groupId, key, timestamp) {
@@ -377,6 +385,12 @@ function deleteMembership(groupId, key, timestamp) {
   usersInGroupsColl.removeByExample({
     _from: "users/" + key,
     _to: "groups/" + groupId,
+  });
+  membershipsHistoryColl.insert({
+    _from: "users/" + key,
+    _to: "groups/" + groupId,
+    type: "leave",
+    timestamp
   });
   // empty the group's vouchers after family group member changes
   if (group.type == "family") {
@@ -453,11 +467,12 @@ function userVerifications(userId) {
     // }
 
     // rollback consensus-based block selection temporarily to ensure faster verification
-    const block = Math.max(
-      ...Object.keys(hashes).map((block) => parseInt(block))
-    );
+    // const block = Math.max(
+    //   ...Object.keys(hashes).map((block) => parseInt(block))
+    // );
     verifications = verificationsColl
-      .byExample({ user: userId, block })
+      .byExample({ user: userId })
+      // .byExample({ user: userId, block })
       .toArray();
   } else {
     verifications = verificationsColl.byExample({ user: userId }).toArray();

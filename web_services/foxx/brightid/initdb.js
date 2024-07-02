@@ -23,6 +23,7 @@ const collections = {
   signedVerifications: "document",
   appIds: "document",
   operationCounters: "document",
+  membershipHistory: "edge",
 };
 
 // deprecated collections should be added to this array after releasing

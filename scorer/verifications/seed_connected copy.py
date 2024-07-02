@@ -1,44 +1,57 @@
 from arango import ArangoClient
 import time
+
 import utils
+# import config
 
 PENALTY = 3
 
+# db = ArangoClient(hosts=config.ARANGO_SERVER).db("_system")
 db = ArangoClient(hosts="http://localhost:8529").db("_system")
 
 
 def seed_connections(members, after):
-    query = """
-        FOR c IN connectionsHistory
-            FILTER c._from IN @members AND (c.timestamp > @after OR c.level == 'reported')
+    return db.aql.execute(
+        """
+        FOR c in connectionsHistory
+            FILTER c._from IN @members
+                AND (c.timestamp > @after OR c.level == 'reported')
             SORT c.timestamp, c._from, c._to ASC
             RETURN c
-    """
-    return db.aql.execute(query, bind_vars={"after": after, "members": members})
+    """,
+        bind_vars={"after": after, "members": members},
+    )
 
 
 def last_verifications():
-    query = """
-        FOR v IN verifications
+    cursor = db.aql.execute(
+        """
+        FOR v in verifications
             FILTER v.name == 'SeedConnected'
             RETURN v
     """
-    cursor = db.aql.execute(query)
-    return {v["user"]: v for v in cursor}
+    )
+    verifications = {v["user"]: v for v in cursor}
+    return verifications
 
 
 def fetch_memberships_history(group_id, after):
-    query = """
-        FOR m IN membershipsHistory
-            FILTER m._to == @group_id AND m.timestamp > @after
+    return db.aql.execute(
+        """
+        FOR m in membershipsHistory
+            FILTER m._to == @group_id
+                AND m.timestamp > @after
             SORT m.timestamp ASC
             RETURN m
-    """
-    return db.aql.execute(query, bind_vars={"after": after, "group_id": group_id})
+    """,
+        bind_vars={"after": after, "group_id": group_id},
+    )
 
 
 def verify(block):
     print("SEED CONNECTED")
+    # new code should not use snapshots.
+    # we use history colls beside the snapshot colls ( connectionsHistory, membershipsHistory )
     
     counts = {}
     users = last_verifications()
@@ -59,21 +72,25 @@ def verify(block):
 
     for seed_group in seed_groups:
         seed_users = {}
+        # print('group',seed_group)
+
         cursor = db["usersInGroups"].find({"_to": seed_group["_id"]})
         members = [ug["_from"] for ug in cursor]
         for member in range(len(members)):
+            # print('member',members[member])
             if member not in seed_users:
                 seed_users[members[member]] = {}
                 seed_users[members[member]]["status"] = True
         memberships_history = []
         try:
             memberships_history = list(
-                fetch_memberships_history(seed_group["_id"], prev_snapshot_time) # * 1000
-            )  
+                fetch_memberships_history(seed_group["_id"], prev_snapshot_time)
+            )  #! change this 0
         except:
             memberships_history = []  # membershipHisotry does not exists
         _mc = 0
         # move backward to find correct seed users in that time
+        # reverse the memberships_history
         memberships_history = memberships_history[::-1]
         for membership in memberships_history:
             if membership["_from"] not in seed_users:
@@ -88,7 +105,10 @@ def verify(block):
         # seeds are synced with prev_snapshot_time
         seed_users_id = list(seed_users.keys())
 
-        connections = seed_connections(seed_users_id, prev_snapshot_time)# *1000
+        # print(seed_users)
+        # connections = seed_connections(seed_users_id, prev_snapshot_time * 1000)
+        connections = seed_connections(seed_users_id, prev_snapshot_time)
+        # print(list(connections))
         
         quota = seed_group.get("quota", 0)
         counter = counts.get(seed_group["_key"], 0)
@@ -99,22 +119,29 @@ def verify(block):
             ):
                 if (
                     memberships_history[_mc]['timestamp'] <= c['timestamp']
-                ):  
-                    # need to refresh seeds status
-                    seed = seed_users.get(memberships_history[_mc]["_from"])
+                    # memberships_history[_mc]["timestamp"]
+                    # <= 1000000000000000000000000
+                ):  # need to refresh seeds status
                     
+                    seed = seed_users.get(memberships_history[_mc]["_from"])
+                    # print(
+                    #     seed, memberships_history[_mc],c, "Seeeeeeeeeeeeeeed sttttt/*/*"
+                    # )
                     if memberships_history[_mc]["type"] == "join":
-                        seed_users[memberships_history[_mc]["_from"]]["status"] = True
+                        seed["status"] = True
                     elif memberships_history[_mc]["type"] == "leave":
-                        seed_users[memberships_history[_mc]["_from"]]["status"] = False
+                        seed["status"] = False
                     _mc += 1
-           
-            seed = seed_users.get(c["_from"])
+            s = c["_from"]
+            seed = seed_users.get(s)
+            # print(seed)
             # check seed user validity
             if seed["status"] == False:
-                print("rejecting seed user because of leave", seed,s,seed_group["_key"])   
+                print("rejecting seed user because of leave", seed)
                 continue
 
+
+            # main logic
             u = c["_to"].replace("users/", "")
             if u not in users:
                 users[u] = {"connected": [], "reported": [], "communities": []}
@@ -141,11 +168,11 @@ def verify(block):
         # penalizing users that are reported by seeds
         rank = len(d["connected"]) - len(d["reported"]) * PENALTY
         if(users[u].get("rank") == rank):
-            # print('rank is the same, ignore',u, rank, d["connected"], d["reported"])
+            print('rank is the same, ignore',u, rank, d["connected"], d["reported"])
             continue
         elif(users[u].get("rank") != None):
             # needs to be updated
-            # print('updating rank',u)
+            print('updating rank',u)
             verifications_col.update(
                 {
                     "_key": users[u]["_key"],
@@ -161,7 +188,7 @@ def verify(block):
                 }
             )
         else:
-            # print(rank,u,d["connected"],d["reported"],seed,s,seed_group["_key"])
+            print(rank,u,d["connected"],d["reported"])
             verifications_col.insert(
                 {
                     "name": "SeedConnected",
@@ -188,68 +215,97 @@ def verify(block):
     print(f"verifications: {counter}\n")
 
 
-def setup_tests():
-    print('Setting up tests...')
+# test purpose
+def setupTests():
+    print('setting up tests')
+    # create coll if not exists
+    # if not db.has_collection("variables"):
+    #     db.create_collection("variables")
+    # if not db.has_collection("users"):
+    #     db.create_collection("users")
+    # if not db.has_collection("groups"):
+    #     db.create_collection("groups")
+    # if not db.has_collection("usersInGroups"):
+    #     db.create_collection("usersInGroups")
+    # if not db.has_collection("membershipsHistory"):
+    #     db.create_collection("membershipsHistory")
+    # if not db.has_collection("connectionsHistory"):
+    #     db.create_collection("connectionsHistory")
+    # if not db.has_collection("verifications"):
+    #     db.create_collection("verifications")
     db["variables"].insert({"_key": "PREV_SNAPSHOT_TIME", "value": 10})
-    db["users"].insert_many([
-        {"_key": "u1"}, {"_key": "u2"}, {"_key": "u3"}, {"_key": "u4"},
-        {"_key": "u5"}, {"_key": "u6"}, {"_key": "u7"}, {"_key": "u8"},
-        {"_key": "u9"}, {"_key": "u10"}
-    ])
-    db["groups"].insert_many([
-        {"_key": "g1", "seed": True, "quota": 1000},
-        {"_key": "g2", "seed": True, "quota": 2000}
-    ])
-    db["usersInGroups"].insert_many([
-        {"_from": "users/u1", "_to": "groups/g1"},
-        {"_from": "users/u4", "_to": "groups/g1"},
-        {"_from": "users/u7", "_to": "groups/g2"}
-    ])
-    db["membershipsHistory"].insert_many([
-        {"_to": "groups/g1", "_from": "users/u1", "type": "join", "timestamp": 10},
-        {"_to": "groups/g1", "_from": "users/u4", "type": "join", "timestamp": 12},
+    # db["variables"].insert({"_key": "VERIFICATION_BLOCK", "value": 10})
+    # seed users
+    db["users"].insert({"_key": "u1"})  # seed
+    db["users"].insert({"_key": "u2"})
+    db["users"].insert({"_key": "u3"})
+    db["users"].insert({"_key": "u4"})  # seed
+    db["users"].insert({"_key": "u5"})
+    db["users"].insert({"_key": "u6"})
+    db["users"].insert({"_key": "u7"})  # seed
+    db["users"].insert({"_key": "u8"})
+    db["users"].insert({"_key": "u9"})
+    db["users"].insert({"_key": "u10"})
+
+    # seed groups
+    db["groups"].insert({"_key": "g1", "seed": True, "quota": 1000})
+    db["groups"].insert({"_key": "g2", "seed": True, "quota": 2000})
+
+    # users in groups (seeds)
+    db["usersInGroups"].insert({"_from": "users/u1", "_to": "groups/g1"})
+    db["membershipsHistory"].insert(
+        {"_to": "groups/g1", "_from": "users/u1", "type": "join", "timestamp": 10}
+    )
+
+    db["usersInGroups"].insert({"_from": "users/u4", "_to": "groups/g1"})
+    db["membershipsHistory"].insert(
+        {"_to": "groups/g1", "_from": "users/u4", "type": "join", "timestamp": 12}
+    )
+
+    db["usersInGroups"].insert({"_from": "users/u7", "_to": "groups/g2"})
+    db["membershipsHistory"].insert(
         {"_to": "groups/g2", "_from": "users/u7", "type": "join", "timestamp": 15}
-    ])
-    db["connectionsHistory"].insert({
-        "_from": "users/u1", "_to": "users/u2", "level": "just met", "timestamp": 12
-    })
+    )
 
-
-def setup_second_test():
-    print('Setting up second test...')
-    db["membershipsHistory"].insert({
-        "_to": "groups/g1", "_from": "users/u4", "type": "leave", "timestamp": 17
-    })
-    db["connectionsHistory"].insert_many([
-        {"_from": "users/u4", "_to": "users/u5", "level": "just met", "timestamp": 18},
-        {"_from": "users/u7", "_to": "users/u8", "level": "just met", "timestamp": 19},
-        {"_from": "users/u7", "_to": "users/u2", "level": "just met", "timestamp": 20},
-        
-    ])
-
-def setup_third_test():
-    print('Setting up third test...')
-    db["usersInGroups"].delete_match({"_from": "users/u4", "_to": "groups/g1"})
-    db["membershipsHistory"].insert({
-        "_to": "groups/g2", "_from": "users/u7", "type": "leave", "timestamp": 22
-    })
-    db["connectionsHistory"].insert({
-        "_from": "users/u7", "_to": "users/u6", "level": "just met", "timestamp": 24
-    })
-    db["membershipsHistory"].insert({
-        "_to": "groups/g2", "_from": "users/u7", "type": "join", "timestamp": 25
-    })
-    db["connectionsHistory"].insert({
-        "_from": "users/u7", "_to": "users/u10", "level": "just met", "timestamp": 26
-    })
+    # connections
+    db["connectionsHistory"].insert(
+        {
+            "_from": "users/u1",
+            "_to": "users/u2",
+            "level": "just met",
+            "timestamp": 12,
+        }
+    )
     
+def setupSecondTest():
+    print('setting up second test')
+    # leave
+    db["membershipsHistory"].insert(
+        {"_to": "groups/g1", "_from": "users/u4", "type": "leave", "timestamp": 17}
+    )
+    # connect u4 with u2
+    # this should be prevented
+    db["connectionsHistory"].insert(
+        {
+            "_from": "users/u4",
+            "_to": "users/u5",
+            "level": "just met",
+            "timestamp": 18,
+        }
+    )
+    # this should be updated
+    db["connectionsHistory"].insert(
+        {
+            "_from": "users/u7",
+            "_to": "users/u2",
+            "level": "just met",
+            "timestamp": 20,
+        }
+    )
 
-def cleanup_tests():
-    try:
-        db["variables"].delete("PREV_SNAPSHOT_TIME")    
-    except Exception:
-        pass
-    
+def cleanupTests():
+    db["variables"].delete("PREV_SNAPSHOT_TIME")
+    # db["variables"].delete("VERIFICATION_BLOCK")
     db["users"].truncate()
     db["groups"].truncate()
     db["usersInGroups"].truncate()
@@ -259,16 +315,16 @@ def cleanup_tests():
 
 
 def test():
-    cleanup_tests()
-    setup_tests()
+    # test purpose
+    cleanupTests()
+    setupTests()
     verify(11)
-    db["variables"].update({"_key": "PREV_SNAPSHOT_TIME", "value": 16})
-    setup_second_test()
+    db["variables"].delete("PREV_SNAPSHOT_TIME")
+    db["variables"].insert({"_key": "PREV_SNAPSHOT_TIME", "value": 16})
+
+    setupSecondTest()
     verify(12)
-    db["variables"].update({"_key": "PREV_SNAPSHOT_TIME", "value": 21})
-    setup_third_test()
-    verify(13)
-    # cleanup_tests()
+    # cleanupTests()
 
 
 test()
