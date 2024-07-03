@@ -1,10 +1,12 @@
 from arango import ArangoClient
 import time
-import utils
+from . import utils
+import config
 
 PENALTY = 3
 
-db = ArangoClient(hosts="http://localhost:8529").db("_system")
+# db = ArangoClient(hosts="http://localhost:8529").db("_system")
+db = ArangoClient(hosts=config.ARANGO_SERVER).db('_system')
 
 
 def seed_connections(members, after):
@@ -141,11 +143,10 @@ def verify(block):
         # penalizing users that are reported by seeds
         rank = len(d["connected"]) - len(d["reported"]) * PENALTY
         if(users[u].get("rank") == rank):
-            # print('rank is the same, ignore',u, rank, d["connected"], d["reported"])
+            # rank is the same, ignore
             continue
         elif(users[u].get("rank") != None):
             # needs to be updated
-            # print('updating rank',u)
             verifications_col.update(
                 {
                     "_key": users[u]["_key"],
@@ -161,7 +162,6 @@ def verify(block):
                 }
             )
         else:
-            # print(rank,u,d["connected"],d["reported"],seed,s,seed_group["_key"])
             verifications_col.insert(
                 {
                     "name": "SeedConnected",
@@ -271,4 +271,4 @@ def test():
     # cleanup_tests()
 
 
-test()
+# test()

@@ -70,13 +70,14 @@ def process():
     for v in verifiers:
         if block % (config.SNAPSHOTS_PERIOD * verifiers[v]['step']) != 0:
             continue
+      
         verifiers[v]['verifier'].verify(block)
 
     update_verifications_hashes(block)
     fname = os.path.join(config.SNAPSHOTS_PATH, 'snapshot.chunk')
 
     # remove the snapshot file
-    shutil.rmtree(fname, ignore_errors=True)
+    os.remove(fname)
     print(f'{get_time()} - processing {fname} completed')
 
 
@@ -84,7 +85,7 @@ def next_snapshot():
     
     while True:
         fname = os.path.join(config.SNAPSHOTS_PATH, 'snapshot.chunk')
-        if os.path.exists(fname):
+        if os.path.isfile(fname):
             snapshot = 1
             return snapshot
         time.sleep(1)
@@ -114,9 +115,9 @@ def main():
     wait()
     print('db started')
     while True:
-        snapshot = next_snapshot()
+        next_snapshot()
         try:
-            process(snapshot)
+            process()
         except Exception as e:
             print(f'Error: {e}')
             traceback.print_exc()

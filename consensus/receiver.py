@@ -71,10 +71,10 @@ def process_op(op):
 
 
 def save_snapshot(block):
-    dir_name = config.SNAPSHOTS_PATH()
+    dir_name = config.SNAPSHOTS_PATH
     # create snapshot.chunk file to trigger the scorer service
-    with open(os.path.join(dir_name, 'snapshot.chunk'), 'w') as f:
-        f.write(str(block))
+    with open(f'{dir_name}/snapshot.chunk', 'w') as f:
+        f.write(f'{block}')
     
     
     

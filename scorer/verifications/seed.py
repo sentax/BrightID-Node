@@ -4,13 +4,12 @@ from . import utils
 import config
 
 db = ArangoClient(hosts=config.ARANGO_SERVER).db('_system')
-snapshot_db = ArangoClient(hosts=config.ARANGO_SERVER).db('snapshot')
 
 
 def verify(block):
     print('SEED')
 
-    seeds = snapshot_db.aql.execute('''
+    seeds = db.aql.execute('''
         FOR g in groups
             FILTER g.seed == true
             FOR ug in usersInGroups
