@@ -70,7 +70,7 @@ def verify(block):
         memberships_history = []
         try:
             memberships_history = list(
-                fetch_memberships_history(seed_group["_id"], prev_snapshot_time) # * 1000
+                fetch_memberships_history(seed_group["_id"], prev_snapshot_time * 1000) 
             )  
         except:
             memberships_history = []  # membershipHisotry does not exists
@@ -90,7 +90,7 @@ def verify(block):
         # seeds are synced with prev_snapshot_time
         seed_users_id = list(seed_users.keys())
 
-        connections = seed_connections(seed_users_id, prev_snapshot_time)# *1000
+        connections = seed_connections(seed_users_id, prev_snapshot_time * 1000)
         
         quota = seed_group.get("quota", 0)
         counter = counts.get(seed_group["_key"], 0)
